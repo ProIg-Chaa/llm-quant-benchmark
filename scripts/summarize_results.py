@@ -41,13 +41,13 @@ def mean_field(rows: List[Dict[str, str]], field: str) -> float:
     return mean(values) if values else float("nan")
 
 
-def render_markdown(grouped: Dict[str, List[Dict[str, str]]]) -> str:
+def render_markdown(grouped: Dict[str, List[Dict[str, str]]], title: str) -> str:
     order = ["fp16", "bnb_int8", "bnb_int4", "awq", "gptq"]
     ordered_keys = [key for key in order if key in grouped] + sorted(
         key for key in grouped.keys() if key not in order
     )
     lines = [
-        None,
+        f"# {title}",
         "",
         "| quant_method | rows | avg_ttft_ms | avg_total_latency_ms | avg_decode_tokens_per_s | avg_request_tokens_per_s | avg_peak_gpu_mem_mb |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -75,8 +75,7 @@ def main() -> int:
     markdown_out.parent.mkdir(parents=True, exist_ok=True)
 
     grouped = load_rows(input_paths)
-    content = render_markdown(grouped)
-    content = content.replace("None", f"# {args.title}", 1)
+    content = render_markdown(grouped, args.title)
     markdown_out.write_text(content, encoding="utf-8")
     print(content, end="")
     return 0
