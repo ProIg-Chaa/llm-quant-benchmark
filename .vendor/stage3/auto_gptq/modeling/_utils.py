@@ -312,7 +312,12 @@ def simple_dispatch_model(model, device_map):
 
     if "" in device_map:
         d = device_map[""]
-        model = model.to(torch.device(d))
+        target_device = torch.device(d)
+        has_meta_params = any(getattr(param, "is_meta", False) for param in model.parameters())
+        if has_meta_params:
+            model = model.to_empty(device=target_device)
+        else:
+            model = model.to(target_device)
         model.hf_device_map = device_map
         return model
 

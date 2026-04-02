@@ -125,7 +125,8 @@ class BaseQuantizeConfig(PushToHubMixin):
             "config.json",
         ]:
             if os.path.isdir(save_dir):  # Local
-                resolved_config_file = join(save_dir, quantize_config_filename)
+                candidate = join(save_dir, quantize_config_filename)
+                resolved_config_file = candidate if os.path.exists(candidate) else None
             else:  # Remote
                 resolved_config_file = cached_file(
                     save_dir,

@@ -171,6 +171,7 @@ def load_model_and_tokenizer(
     device: torch.device,
 ) -> Tuple[object, object]:
     torch_dtype = resolve_torch_dtype(precision)
+    device_map = {"": 0} if device.type == "cuda" else {"": "cpu"}
     tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -210,26 +211,52 @@ def load_model_and_tokenizer(
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
             quantization_config=quant_config,
-            device_map={"": 0} if device.type == "cuda" else "cpu",
+            device_map=device_map,
             torch_dtype=torch_dtype,
             **common_kwargs,
         )
         model.eval()
     elif quant_method in {"awq", "gptq"}:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            device_map={"": 0} if device.type == "cuda" else "cpu",
-            torch_dtype=torch_dtype,
-            **common_kwargs,
-        )
-        model.eval()
+        if quant_method == "awq":
+            try:
+                from awq import AutoAWQForCausalLM
+            except Exception as exc:
+                raise RuntimeError(
+                    "AWQ benchmarking requires the repo-local stage3 vendor path with autoawq installed."
+                ) from exc
+
+            model = AutoAWQForCausalLM.from_quantized(
+                model_path,
+                fuse_layers=False,
+                safetensors=True,
+                device_map=device_map,
+                use_ipex=False,
+            )
+        else:
+            try:
+                from auto_gptq import AutoGPTQForCausalLM
+            except Exception as exc:
+                raise RuntimeError(
+                    "GPTQ benchmarking requires the repo-local stage3 vendor path with auto_gptq installed."
+                ) from exc
+
+            model = AutoGPTQForCausalLM.from_quantized(
+                model_path,
+                device_map=device_map,
+                use_safetensors=True,
+                trust_remote_code=False,
+                low_cpu_mem_usage=False,
+                disable_exllama=True,
+                disable_exllamav2=True,
+            )
     else:
         raise ValueError(f"Unsupported quant_method: {quant_method}")
 
-    model.generation_config.do_sample = False
-    model.generation_config.temperature = None
-    model.generation_config.top_p = None
-    model.generation_config.top_k = None
+    generation_model = model.model if hasattr(model, "model") else model
+    generation_model.generation_config.do_sample = False
+    generation_model.generation_config.temperature = None
+    generation_model.generation_config.top_p = None
+    generation_model.generation_config.top_k = None
     return model, tokenizer
 
 
