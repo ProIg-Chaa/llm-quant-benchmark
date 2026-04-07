@@ -1,16 +1,48 @@
 # llm-quant-benchmark
 
-Stage 1 builds a runnable baseline for local LLM inference benchmarking with a fixed model, fixed prompts, and a fixed output schema. Stage 2 extends the same pipeline to `bitsandbytes` INT8 and INT4 without changing the result schema.
-Stage 3 extends the same benchmark to pre-quantized local `AWQ` and `GPTQ` model directories.
+A reproducible LLM inference quantization benchmark project comparing `FP16`, `bitsandbytes INT8`, `bitsandbytes INT4`, `AWQ`, and `GPTQ` on the same base model and prompt set.
 
-## Stage 1 Scope
+The project is organized as an engineering experiment rather than a one-off notebook. It fixes model, prompts, decoding policy, and output schema, then records memory, latency, throughput, and generation samples in reusable CSV/JSONL artifacts.
 
-- Fixed base model: `Qwen2.5-3B-Instruct`
-- Fixed backend: `transformers`
-- Fixed precision baseline: `FP16`
-- Fixed prompt set: `prompts/generation_smoke.jsonl`
-- Fixed decoding policy: `do_sample=False`, `use_cache=True`
-- Fixed output artifacts: CSV metrics plus JSONL generation samples
+## What This Project Measures
+
+- `GPU memory`: peak allocated memory during a request
+- `TTFT`: time to first token
+- `Total latency`: end-to-end generation time
+- `Decode throughput`: generated tokens per second after first token
+- `Request throughput`: generated tokens per second over the whole request
+- `Output samples`: fixed prompts for qualitative comparison
+
+## Experiment Setup
+
+- Base model: `Qwen2.5-3B-Instruct`
+- Backend: `transformers`
+- Prompt set: `prompts/generation_smoke.jsonl`
+- Batch size: `1`
+- Max new tokens: `64`
+- Warmup runs: `1`
+- Measure runs: `3`
+- Decoding policy: `do_sample=False`, `use_cache=True`
+
+## Final Result Summary
+
+Source: [report/stage3_all_quant_summary.md](/share/home/wangzixu/liudinghao/gushuo/proj/llm-quant-benchmark/report/stage3_all_quant_summary.md)
+
+| quant_method | rows | avg_ttft_ms | avg_total_latency_ms | avg_decode_tokens_per_s | avg_request_tokens_per_s | avg_peak_gpu_mem_mb |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| fp16 | 9 | 33.557 | 1841.770 | 35.406 | 34.760 | 6009.961 |
+| bnb_int8 | 9 | 244.580 | 12975.846 | 4.948 | 4.855 | 3398.132 |
+| bnb_int4 | 9 | 59.987 | 2428.496 | 27.026 | 26.358 | 2140.986 |
+| awq | 9 | 55.881 | 3022.898 | 19.577 | 19.208 | 1984.557 |
+| gptq | 9 | 95.042 | 4868.792 | 13.408 | 13.147 | 2095.575 |
+
+## Key Findings
+
+- `FP16` delivered the best latency and throughput, but used the most memory.
+- `bitsandbytes INT4` had the best overall memory/throughput tradeoff in this stack.
+- `AWQ` achieved the lowest memory footprint.
+- `GPTQ` also reduced memory significantly, but was slower than `AWQ` and `bnb_int4`.
+- `bitsandbytes INT8` reduced memory, but was dramatically slower in this environment and is not a good default deployment choice here.
 
 ## Project Layout
 
@@ -26,21 +58,22 @@ llm-quant-benchmark/
 └── README.md
 ```
 
-## Stage 1 Commands
+## Core Commands
 
-Check the runtime and dependency status:
+Check environment:
 
 ```bash
-micromamba run -n llm_opt python scripts/check_env.py
+/share/home/wangzixu/.local/share/mamba/envs/llm_opt/bin/python scripts/check_env.py
 ```
 
-Run the FP16 baseline benchmark:
+Run FP16 baseline:
 
 ```bash
-micromamba run -n llm_opt python benchmarks/run_generation_benchmark.py \
+/share/home/wangzixu/.local/share/mamba/envs/llm_opt/bin/python benchmarks/run_generation_benchmark.py \
   --model-path /share/home/wangzixu/liudinghao/gushuo/proj/transfoemer-llm/model/Qwen2.5-3B-Instruct \
   --model-name qwen2.5-3b-instruct \
   --precision fp16 \
+  --quant-method fp16 \
   --backend transformers \
   --prompt-file prompts/generation_smoke.jsonl \
   --batch-size 1 \
@@ -51,82 +84,42 @@ micromamba run -n llm_opt python benchmarks/run_generation_benchmark.py \
   --sample-out results/samples/fp16_baseline.jsonl
 ```
 
-## Stage 2 Commands
-
-Install only `bitsandbytes` into `llm_opt` without upgrading existing packages:
+Install `bitsandbytes` only:
 
 ```bash
 bash scripts/install_bitsandbytes.sh
 ```
 
-Run the entire Stage 2 comparison in one shot:
+Run Stage 2 (`FP16 + bnb INT8 + bnb INT4`):
 
 ```bash
 bash scripts/run_stage2_bitsandbytes.sh
 ```
 
-Run INT8:
-
-```bash
-micromamba run -n llm_opt python benchmarks/run_generation_benchmark.py \
-  --model-path /share/home/wangzixu/liudinghao/gushuo/proj/transfoemer-llm/model/Qwen2.5-3B-Instruct \
-  --model-name qwen2.5-3b-instruct \
-  --precision fp16 \
-  --quant-method bnb_int8 \
-  --backend transformers \
-  --prompt-file prompts/generation_smoke.jsonl \
-  --batch-size 1 \
-  --max-new-tokens 64 \
-  --warmup-runs 1 \
-  --measure-runs 3 \
-  --csv-out results/raw/bnb_int8.csv \
-  --sample-out results/samples/bnb_int8.jsonl
-```
-
-Run INT4:
-
-```bash
-micromamba run -n llm_opt python benchmarks/run_generation_benchmark.py \
-  --model-path /share/home/wangzixu/liudinghao/gushuo/proj/transfoemer-llm/model/Qwen2.5-3B-Instruct \
-  --model-name qwen2.5-3b-instruct \
-  --precision fp16 \
-  --quant-method bnb_int4 \
-  --backend transformers \
-  --prompt-file prompts/generation_smoke.jsonl \
-  --batch-size 1 \
-  --max-new-tokens 64 \
-  --warmup-runs 1 \
-  --measure-runs 3 \
-  --csv-out results/raw/bnb_int4.csv \
-  --sample-out results/samples/bnb_int4.jsonl
-```
-
-Generate a markdown comparison table:
-
-```bash
-micromamba run -n llm_opt python scripts/summarize_results.py \
-  --inputs results/raw/fp16_baseline.csv results/raw/bnb_int8.csv results/raw/bnb_int4.csv \
-  --markdown-out report/stage2_bitsandbytes_summary.md \
-  --title "Stage 2 BitsAndBytes Benchmark Summary"
-```
-
-## Stage 3 Commands
-
-Install Stage 3 runtime deps into a repo-local vendor directory instead of modifying `llm_opt`:
+Install Stage 3 runtime deps into repo-local vendor path:
 
 ```bash
 bash scripts/install_stage3_quant_deps.sh
 ```
 
-Run local AWQ and GPTQ benchmarks:
+Run Stage 3 (`AWQ + GPTQ`):
 
 ```bash
 bash scripts/run_stage3_prequantized.sh
 ```
 
+Regenerate the final summary table:
+
+```bash
+/share/home/wangzixu/.local/share/mamba/envs/llm_opt/bin/python scripts/summarize_results.py \
+  --inputs results/raw/fp16_baseline.csv results/raw/bnb_int8.csv results/raw/bnb_int4.csv results/raw/awq.csv results/raw/gptq.csv \
+  --markdown-out report/stage3_all_quant_summary.md \
+  --title "Stage 3 All Quant Benchmark Summary"
+```
+
 ## Output Schema
 
-Every experiment row uses the same CSV schema:
+Every benchmark row uses the same schema:
 
 ```text
 timestamp
@@ -149,31 +142,9 @@ status
 error_msg
 ```
 
-Metric definitions in Stage 1:
+## Reports
 
-- `ttft_ms`: time from `generate()` start to the first generated token observed by the streamer
-- `total_latency_ms`: time from `generate()` start to generation completion
-- `decode_tokens_per_s`: `generated_tokens / decode_time`
-- `request_tokens_per_s`: `generated_tokens / total_time`
-- `peak_gpu_mem_mb`: `torch.cuda.max_memory_allocated()` after resetting peak stats before each request
-
-## Current Environment Notes
-
-`llm_opt` currently has `torch==2.4.0+cu124`, `transformers==4.45.2`, and `bitsandbytes==0.43.3` available. Stage 3 uses a repo-local vendor directory for `autoawq`, `auto_gptq`, and `optimum` so the shared environment does not need to be upgraded.
-
-For Stage 2, the benchmark keeps the same prompt file, batch size, and output schema. The only controlled change is `--quant-method`:
-
-- `fp16`
-- `bnb_int8`
-- `bnb_int4`
-- `awq`
-- `gptq`
-
-## Validation Checklist
-
-- `scripts/check_env.py` prints package availability and CUDA visibility
-- `benchmarks/run_generation_benchmark.py` loads from a local model path only
-- Benchmark outputs:
-  - `results/raw/fp16_baseline.csv`
-  - `results/samples/fp16_baseline.jsonl`
-- CSV rows can be reused by later quantization methods without schema changes
+- [report/stage2_bitsandbytes_summary.md](/share/home/wangzixu/liudinghao/gushuo/proj/llm-quant-benchmark/report/stage2_bitsandbytes_summary.md)
+- [report/stage3_all_quant_summary.md](/share/home/wangzixu/liudinghao/gushuo/proj/llm-quant-benchmark/report/stage3_all_quant_summary.md)
+- [report/final_report.md](/share/home/wangzixu/liudinghao/gushuo/proj/llm-quant-benchmark/report/final_report.md)
+- [report/resume_and_interview.md](/share/home/wangzixu/liudinghao/gushuo/proj/llm-quant-benchmark/report/resume_and_interview.md)
